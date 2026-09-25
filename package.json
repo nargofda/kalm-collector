@@ -1,0 +1,14 @@
+{
+  "name": "kalm-collector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "캄134 네이버 판매 현황 수집기",
+  "scripts": {
+    "near": "node collect.js --days 10",
+    "full": "node collect.js --days 45",
+    "dry": "node collect.js --days 3 --dry"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0"
+  }
+}

@@ -1,0 +1,50 @@
+name: 수집
+
+# 가까운 날짜는 자주, 먼 날짜는 하루 두 번.
+# 깃허브 예약 실행은 정시에 오지 않는다 (붐빌 때 20~30분씩 밀린다).
+on:
+  schedule:
+    - cron: '*/10 * * * *'      # 10분마다 — 앞으로 10일
+    - cron: '0 0,12 * * *'      # 하루 2번(한국시간 09시·21시) — 11~45일
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '며칠치를 볼지'
+        default: '10'
+      offset:
+        description: '며칠 뒤부터 볼지'
+        default: '0'
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+
+      - name: 범위 정하기
+        id: range
+        run: |
+          if [ -n "${{ inputs.days }}" ]; then
+            echo "days=${{ inputs.days }}"     >> $GITHUB_OUTPUT
+            echo "offset=${{ inputs.offset }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 0,12 * * *" ]; then
+            echo "days=35"   >> $GITHUB_OUTPUT
+            echo "offset=10" >> $GITHUB_OUTPUT
+          else
+            echo "days=10"  >> $GITHUB_OUTPUT
+            echo "offset=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 수집
+        env:
+          KALM_KEY: ${{ secrets.KALM_KEY }}
+        run: node collect.js --days ${{ steps.range.outputs.days }} --offset ${{ steps.range.outputs.offset }}
