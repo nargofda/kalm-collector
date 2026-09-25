@@ -1,11 +1,11 @@
 name: 수집
 
-# 가까운 날짜는 자주, 먼 날짜는 하루 두 번.
-# 깃허브 예약 실행은 정시에 오지 않는다 (붐빌 때 20~30분씩 밀린다).
+# 깃허브의 10분 예약은 붐비면 그냥 건너뛴다 (실측 1~3시간 간격이었다).
+# 그래서 예약은 4시간마다 한 번만 받고, 시작되면 그 안에서 10분마다 돈다.
+# 다음 예약이 겹치면 새 것이 이어받는다(concurrency).
 on:
   schedule:
-    - cron: '*/10 * * * *'      # 10분마다 — 앞으로 10일
-    - cron: '0 0,12 * * *'      # 하루 2번(한국시간 09시·21시) — 11~45일
+    - cron: '5 */4 * * *'       # 4시간마다 — 가까운 10일, 안에서 10분 간격
   workflow_dispatch:
     inputs:
       days:
@@ -14,11 +14,18 @@ on:
       offset:
         description: '며칠 뒤부터 볼지'
         default: '0'
+      loop:
+        description: '몇 분 동안 반복할지 (0이면 한 번만)'
+        default: '0'
+
+concurrency:
+  group: kalm-near
+  cancel-in-progress: true
 
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 260          # 4시간 20분. 다음 예약과 조금 겹치게 둔다
     steps:
       - uses: actions/checkout@v4
 
@@ -27,24 +34,15 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
-
-      - name: 범위 정하기
-        id: range
-        run: |
-          if [ -n "${{ inputs.days }}" ]; then
-            echo "days=${{ inputs.days }}"     >> $GITHUB_OUTPUT
-            echo "offset=${{ inputs.offset }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 0,12 * * *" ]; then
-            echo "days=35"   >> $GITHUB_OUTPUT
-            echo "offset=10" >> $GITHUB_OUTPUT
-          else
-            echo "days=10"  >> $GITHUB_OUTPUT
-            echo "offset=0" >> $GITHUB_OUTPUT
-          fi
 
       - name: 수집
         env:
           KALM_KEY: ${{ secrets.KALM_KEY }}
-        run: node collect.js --days ${{ steps.range.outputs.days }} --offset ${{ steps.range.outputs.offset }}
+        run: |
+          DAYS="${{ inputs.days }}";   DAYS="${DAYS:-10}"
+          OFF="${{ inputs.offset }}";  OFF="${OFF:-0}"
+          LOOP="${{ inputs.loop }}";   LOOP="${LOOP:-250}"
+          echo "범위 ${OFF}일 뒤부터 ${DAYS}일 / ${LOOP}분 동안 10분마다"
+          node collect.js --days "$DAYS" --offset "$OFF" --loop "$LOOP" --every 600

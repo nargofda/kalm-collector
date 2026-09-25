@@ -5,10 +5,15 @@
  * funsoft.co.kr/kalm/api.php 로 보낸다. 네이버 로그인은 하지 않는다.
  *
  * 사용법:
- *   node collect.js                 # 기본: 오늘부터 10일
+ *   node collect.js                 # 기본: 오늘부터 10일, 한 번만
  *   node collect.js --days 45       # 45일치
  *   node collect.js --offset 10 --days 35
  *   node collect.js --dry           # 서버로 보내지 않고 화면에만 출력
+ *   node collect.js --loop 240 --every 600
+ *       240분 동안 600초(10분)마다 반복한다.
+ *
+ * 왜 반복하냐면: 깃허브의 10분 예약은 붐비면 그냥 건너뛴다 (실측 1~3시간 간격).
+ * 그래서 예약은 몇 시간에 한 번만 받고, 한 번 시작되면 그 안에서 10분마다 돈다.
  */
 
 const { chromium } = require('playwright');
@@ -29,6 +34,8 @@ const arg = (name, def) => {
 const DAYS = Number(arg('days', 10));
 const OFFSET = Number(arg('offset', 0));
 const DRY = process.argv.includes('--dry');
+const LOOP_MIN = Number(arg('loop', 0));      // 0이면 한 번만
+const EVERY_SEC = Number(arg('every', 600));
 
 const pad = n => String(n).padStart(2, '0');
 const ymd = d => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
@@ -47,6 +54,27 @@ async function main() {
     process.exit(1);
   }
 
+  if (!LOOP_MIN) { await once(); return; }
+
+  const until = Date.now() + LOOP_MIN * 60 * 1000;
+  let round = 0, fails = 0;
+  while (Date.now() < until) {
+    const began = Date.now();
+    console.log(`\n=== ${++round}회차 (${new Date(began + 9 * 3600e3).toISOString().slice(5, 16).replace('T', ' ')} KST) ===`);
+    try { await once(); fails = 0; }
+    catch (e) {
+      console.error('실패:', String(e).split('\n')[0]);
+      // 연달아 실패하면 뭔가 막힌 것이다. 계속 두드리지 않고 끝낸다.
+      if (++fails >= 3) { console.error('3회 연속 실패 — 중단합니다.'); process.exit(4); }
+    }
+    const wait = EVERY_SEC * 1000 - (Date.now() - began);
+    if (Date.now() + Math.max(wait, 0) >= until) break;
+    if (wait > 0) await sleep(wait);
+  }
+  console.log(`\n${round}회 수집하고 마칩니다.`);
+}
+
+async function once() {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({
     locale: 'ko-KR',
@@ -102,8 +130,8 @@ async function main() {
   if (blocked) console.log('⚠️ 캡차(자동 요청 차단)로 보이는 화면이 나왔습니다.');
 
   if (!items.length) {
-    console.error('보낼 것이 없습니다.');
-    process.exit(2);
+    // 반복 실행 중이면 다음 회차에서 다시 시도한다. 한 번만 돌 때는 오류로 끝난다.
+    throw new Error('읽은 것이 없습니다' + (blocked ? ' (차단으로 보임)' : ''));
   }
   if (DRY) return;
 
@@ -114,7 +142,7 @@ async function main() {
   });
   const out = await res.json().catch(() => ({}));
   console.log('서버 응답:', JSON.stringify(out));
-  if (!out.ok) process.exit(3);
+  if (!out.ok) throw new Error('서버가 거부: ' + (out.error || '알 수 없음'));
 }
 
 /**

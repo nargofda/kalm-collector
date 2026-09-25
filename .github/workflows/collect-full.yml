@@ -1,0 +1,28 @@
+name: 수집(먼 날짜)
+
+# 11~45일은 급하지 않다. 하루 두 번만 본다.
+on:
+  schedule:
+    - cron: '0 0,12 * * *'       # 한국시간 09시·21시
+  workflow_dispatch:
+
+concurrency:
+  group: kalm-full
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: 수집
+        env:
+          KALM_KEY: ${{ secrets.KALM_KEY }}
+        run: node collect.js --days 35 --offset 10
